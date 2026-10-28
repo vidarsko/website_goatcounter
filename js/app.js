@@ -10,6 +10,7 @@
   var dayFmt = new Intl.DateTimeFormat('nb-NO', { day: 'numeric', month: 'short' });
   var longFmt = new Intl.DateTimeFormat('nb-NO', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   var stampFmt = new Intl.DateTimeFormat('nb-NO', { dateStyle: 'medium', timeStyle: 'short' });
+  var timeFmt = new Intl.DateTimeFormat('nb-NO', { hour: '2-digit', minute: '2-digit' });
 
   // Two views in one page: the overview (no hash) and one site's details (#<kode>).
   // The hash keeps the back button and bookmarks working without a second HTML file.
@@ -40,6 +41,19 @@
     return s;
   }
   function parseDay(d) { return new Date(d + 'T00:00:00'); }
+
+  // The last day in the daily series is always the day the workflow ran, since
+  // build_stats.py asks for data up to the hour after the run: that day isn't over.
+  // Weekly series never have an unfinished bar, since the running week is left out.
+  function isPending(points, i) { return state.period <= 90 && i === points.length - 1; }
+
+  // A column with a rounded top and a square foot on the baseline.
+  function barPath(x, base, w, h, r) {
+    r = Math.min(r, w / 2, h);
+    var top = base - h;
+    return 'M' + x + ' ' + base + 'V' + (top + r) + 'Q' + x + ' ' + top + ' ' + (x + r) + ' ' + top +
+      'H' + (x + w - r) + 'Q' + (x + w) + ' ' + top + ' ' + (x + w) + ' ' + (top + r) + 'V' + base + 'Z';
+  }
 
   function selectedSites() {
     return data.sites.filter(function (s) { return state.site === 'all' || s.code === state.site; });
@@ -83,18 +97,18 @@
   // ---- Overview: one card per site -------------------------------------------
 
   function sparkline(series) {
-    var pts = series.points, W = 300, H = 56, pad = 4;
+    var pts = series.points, W = 300, H = 56, pad = 2;
     var max = Math.max(1, Math.max.apply(null, pts.map(function (p) { return p.n; })));
-    var x = function (i) { return pad + i * (W - 2 * pad) / Math.max(pts.length - 1, 1); };
-    var y = function (v) { return H - pad - v / max * (H - 2 * pad); };
-    var line = pts.map(function (p, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.n).toFixed(1); }).join(' ');
+    var slot = W / Math.max(pts.length, 1);
+    var gap = Math.min(2, slot * 0.25), bw = Math.min(24, slot - gap);
     var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', 'aria-hidden': 'true', 'class': 'spark' });
-    var area = svgEl('path', { d: line + ' L' + x(pts.length - 1) + ' ' + (H - pad) + ' L' + x(0) + ' ' + (H - pad) + ' Z', 'class': 'spark-area' });
-    area.style.fill = color(series.code);
-    var path = svgEl('path', { d: line, 'class': 'spark-line' });
-    path.style.stroke = color(series.code);
-    svg.appendChild(area);
-    svg.appendChild(path);
+    pts.forEach(function (p, i) {
+      if (!p.n) return;
+      var bar = svgEl('path', { d: barPath(i * slot + (slot - bw) / 2, H, bw, p.n / max * (H - pad), 2),
+        'class': 'spark-bar' + (isPending(pts, i) ? ' pending' : '') });
+      bar.style.fill = color(series.code);
+      svg.appendChild(bar);
+    });
     return svg;
   }
 
@@ -222,20 +236,16 @@
       return Math.max.apply(null, s.points.map(function (p) { return p.n; }));
     })));
     var yAt = function (v) { return m.top + ih - v / max * ih; };
-
-    // End labels only where they don't collide; otherwise the legend carries identity
-    // and the right margin they would need is given back to the plot.
-    var ends = series.map(function (s) {
-      var last = s.points[s.points.length - 1];
-      return { s: s, y: yAt(last.n), n: last.n };
-    }).sort(function (a, b) { return a.y - b.y; });
-    var endLabels = !narrow && ends.every(function (e, i) { return i === 0 || e.y - ends[i - 1].y >= 16; });
-    if (endLabels) m.right = series.length > 1 ? 120 : 56;
     var iw = W - m.left - m.right;
-    var xAt = function (i) { return m.left + (xs.length === 1 ? iw / 2 : i * iw / (xs.length - 1)); };
+    // One band per day (or week); the column is centred in it and capped at 24px,
+    // with at least a 2px gap to its neighbour once the bands get wide enough.
+    var slot = iw / xs.length;
+    var gap = Math.min(2, slot * 0.25);
+    var bw = Math.min(24, (slot - gap) / series.length);
+    var xAt = function (i) { return m.left + (i + 0.5) * slot; };
 
     var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', tabindex: '0',
-      'aria-label': 'Linjediagram over besøkende. Bruk piltastene for å flytte mellom datapunkter; tabellen under har alle tallene.' });
+      'aria-label': 'Søylediagram over besøkende. Bruk piltastene for å flytte mellom søylene; tabellen under har alle tallene.' });
 
     for (var t = 0; t <= 4; t++) {
       var v = max * t / 4, y = yAt(v);
@@ -253,55 +263,41 @@
       svg.appendChild(tx);
     }
 
-    series.forEach(function (s) {
-      var d = s.points.map(function (p, i) { return (i ? 'L' : 'M') + xAt(i).toFixed(1) + ' ' + yAt(p.n).toFixed(1); }).join(' ');
-      var path = svgEl('path', { d: d, 'class': 'series' });
-      path.style.stroke = color(s.code);
-      svg.appendChild(path);
-    });
+    // Hover layer: a band behind the columns marks the day under the pointer,
+    // one tooltip lists every series.
+    var band = svgEl('rect', { y: m.top, width: slot, height: ih, visibility: 'hidden', 'class': 'hover-band' });
+    svg.appendChild(band);
 
-    if (endLabels) {
-      ends.forEach(function (e) {
-        var dot = svgEl('circle', { cx: xAt(xs.length - 1), cy: e.y, r: 4, 'class': 'dot' });
-        dot.style.fill = color(e.s.code);
-        svg.appendChild(dot);
-        var t2 = svgEl('text', { x: xAt(xs.length - 1) + 10, y: e.y + 4, 'class': 'end-label' });
-        t2.textContent = (series.length > 1 ? e.s.label.split('.')[0] + ' ' : '') + num.format(e.n);
-        svg.appendChild(t2);
+    series.forEach(function (s, j) {
+      var x0 = (slot - bw * series.length) / 2 + j * bw;
+      s.points.forEach(function (p, i) {
+        if (!p.n) return;
+        var bar = svgEl('path', { d: barPath(m.left + i * slot + x0, m.top + ih, bw, p.n / max * ih, 4),
+          'class': 'bar' + (isPending(s.points, i) ? ' pending' : '') });
+        bar.style.fill = color(s.code);
+        svg.appendChild(bar);
       });
-    }
-
-    // Hover layer: crosshair snaps to the nearest x, one tooltip lists every series.
-    var hover = svgEl('g', { visibility: 'hidden' });
-    var cross = svgEl('line', { y1: m.top, y2: m.top + ih, 'class': 'crosshair' });
-    hover.appendChild(cross);
-    var dots = series.map(function (s) {
-      var c = svgEl('circle', { r: 4, 'class': 'dot' });
-      c.style.fill = color(s.code);
-      hover.appendChild(c);
-      return c;
     });
-    svg.appendChild(hover);
+
     var hit = svgEl('rect', { x: m.left, y: m.top, width: iw, height: ih, 'class': 'hit' });
     svg.appendChild(hit);
 
     var active = xs.length - 1;
     function show(i, clientX, clientY) {
       active = i;
-      var x = xAt(i);
-      cross.setAttribute('x1', x); cross.setAttribute('x2', x);
-      series.forEach(function (s, j) { dots[j].setAttribute('cx', x); dots[j].setAttribute('cy', yAt(s.points[i].n)); });
-      hover.setAttribute('visibility', 'visible');
+      band.setAttribute('x', m.left + i * slot);
+      band.setAttribute('visibility', 'visible');
       var title = weekly ? 'Uka fra ' + longFmt.format(parseDay(xs[i])) : longFmt.format(parseDay(xs[i]));
+      if (isPending(xs, i)) title += ' · ikke ferdig, tall fra kl. ' + timeFmt.format(new Date(data.generated_at));
       showTooltip(title, series.map(function (s) {
         return { code: s.code, label: s.label, value: num.format(s.points[i].n) };
       }), clientX, clientY);
     }
-    function hide() { hover.setAttribute('visibility', 'hidden'); hideTooltip(); }
+    function hide() { band.setAttribute('visibility', 'hidden'); hideTooltip(); }
     function indexAt(evt) {
       var r = svg.getBoundingClientRect();
       var px = (evt.clientX - r.left) * W / r.width;
-      return Math.max(0, Math.min(xs.length - 1, Math.round((px - m.left) / iw * (xs.length - 1))));
+      return Math.max(0, Math.min(xs.length - 1, Math.floor((px - m.left) / slot)));
     }
     hit.addEventListener('pointermove', function (e) { show(indexAt(e), e.clientX, e.clientY); });
     hit.addEventListener('pointerleave', hide);
@@ -329,7 +325,7 @@
     series[0].points.slice().reverse().forEach(function (p, ri) {
       var i = series[0].points.length - 1 - ri;
       var tr = el('tr');
-      tr.appendChild(el('td', null, longFmt.format(parseDay(p.x))));
+      tr.appendChild(el('td', null, longFmt.format(parseDay(p.x)) + (isPending(series[0].points, i) ? ' (ikke ferdig)' : '')));
       series.forEach(function (s) { tr.appendChild(el('td', null, num.format(s.points[i].n))); });
       table.appendChild(tr);
     });
