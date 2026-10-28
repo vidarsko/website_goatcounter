@@ -109,7 +109,21 @@
       bar.style.fill = color(series.code);
       svg.appendChild(bar);
     });
-    return svg;
+
+    // The peak value sits on the cap of the tallest column (the latest one on a tie).
+    // It is HTML over the SVG, since text inside a non-uniformly stretched SVG distorts.
+    var wrap = el('div', 'spark-wrap');
+    wrap.appendChild(svg);
+    var peak = pts.reduce(function (best, p, i) { return p.n >= pts[best].n ? i : best; }, 0);
+    if (pts.length && pts[peak].n > 0) {
+      var label = el('span', 'spark-peak', num.format(pts[peak].n));
+      var mid = (peak + 0.5) * slot / W * 100, half = bw / 2 / W * 100;
+      if (mid < 10) { label.style.left = (mid - half) + '%'; }
+      else if (mid > 90) { label.style.left = (mid + half) + '%'; label.style.transform = 'translateX(-100%)'; }
+      else { label.style.left = mid + '%'; label.style.transform = 'translateX(-50%)'; }
+      wrap.appendChild(label);
+    }
+    return wrap;
   }
 
   function renderOverview() {
