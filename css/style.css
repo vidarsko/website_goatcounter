@@ -40,12 +40,13 @@
   --grid: #ECE7DE;
   --axis: #C9C1B3;
 
-  /* One fixed colour per site, never by rank (dataviz reference palette, slots 1-5). */
+  /* One fixed colour per site, never by rank (dataviz reference palette, slots 1-6). */
   --s-aiskilltrees: #2a78d6;
   --s-laeremedki: #eb6834;
   --s-skolesim: #1baf7a;
   --s-skogvoll: #eda100;
   --s-tavela: #e87ba4;
+  --s-underkappa: #008300;
   --s-all: #8E8678;
 }
 
@@ -67,6 +68,7 @@ html[data-theme="dark"] {
   --s-skolesim: #199e70;
   --s-skogvoll: #c98500;
   --s-tavela: #d55181;
+  --s-underkappa: #008300;
   --s-all: #8A8F9E;
 }
 
